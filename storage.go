@@ -9,9 +9,9 @@ import (
 
 var (
 	ErrInvalidDir  = errors.New("FileStorage: invalid dirpath given")
-	ErrNoData      = errors.New("FileStorage: no data")                 // file accessing methods returns this error when the given key has no data
-	ErrExpired     = errors.New("FileStorage data has already expired") // file accessing methods returns this error when the data is expired
-	ErrLiveForever = errors.New("FileStorage: expiredAt is not set")    // IsExpired method on FileStorage returns this error when expiredAt is nil for the key
+	ErrNoData      = errors.New("FileStorage: no data")              // file accessing methods returns this error when the given key has no data
+	ErrExpired     = errors.New("FileStorage: expired")              // file accessing methods returns this error when the data is expired
+	ErrLiveForever = errors.New("FileStorage: expiredAt is not set") // IsExpired method on FileStorage returns this error when expiredAt is nil for the key
 )
 
 // A storage with cache implementation
@@ -28,7 +28,8 @@ type FileStorage struct {
 	trays   map[string]*tray
 }
 
-// FileStorage create file each key at "dirpath/key"
+// FileStorage creates the storage directory at dirpath to place the file into.
+// NewFileStorage returns an error if it fails to prepare directory for the one.
 func NewFileStorage(dirpath string) (storage *FileStorage, err error) {
 	fileInfo, err := os.Stat(dirpath)
 	if err != nil {
@@ -60,17 +61,17 @@ func (f *FileStorage) get(key string, dest interface{}, useCache bool) (err erro
 	return f.trays[key].get(dest, useCache)
 }
 
-// Get scans the stored value from FileStorage into dest. if the data is not stored, then returns ErrNoData. if the has already expired, this returns ErrExpired.
+// Get scans the stored value from FileStorage into the destination pointer. An error is returned if the data is not stored or has already expired.
 func (f *FileStorage) Get(key string, dest interface{}) (err error) {
 	return f.get(key, dest, true)
 }
 
-// Get scans the stored value from FileStorage into dest without cache. if the data is not stored, then returns ErrNoData. if the has already expired, this returns ErrExpired.
+// Get scans the stored value from the stored file into the destination pointer. An error is returned if the data is not stored or has already expired.
 func (f *FileStorage) NoCacheGet(key string, dest interface{}) (err error) {
 	return f.get(key, dest, false)
 }
 
-// IsExpired checks whether the stored data is expired. if the data does not have expiredAt, then this returns ErrLiveForever as the second return value.
+// IsExpired checks whether the stored data is expired. ErrLiveForever is returns if expiredAt is not set.
 func (f *FileStorage) IsExpired(key string) (isExpired bool, err error) {
 	if _, ok := f.trays[key]; !ok {
 		return false, ErrNoData
