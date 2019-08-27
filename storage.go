@@ -2,14 +2,16 @@ package filestorage
 
 import (
 	"errors"
+	"os"
 	"path"
 	"time"
 )
 
 var (
-	ErrNoData      = errors.New("FileStorage: no data")               // file accessing methods returns this error when the given key has no data
-	ErrExpired     = errors.New("filetray: data has already expired") // file accessing methods returns this error when the data is expired
-	ErrLiveForever = errors.New("filetray: expiredAt is not set")     // IsExpired method on FileStorage returns this error when expiredAt is nil for the key
+	ErrInvalidDir  = errors.New("FileStorage: invalid dirpath given")
+	ErrNoData      = errors.New("FileStorage: no data")                 // file accessing methods returns this error when the given key has no data
+	ErrExpired     = errors.New("FileStorage data has already expired") // file accessing methods returns this error when the data is expired
+	ErrLiveForever = errors.New("FileStorage: expiredAt is not set")    // IsExpired method on FileStorage returns this error when expiredAt is nil for the key
 )
 
 // A storage with cache implementation
@@ -27,11 +29,28 @@ type FileStorage struct {
 }
 
 // FileStorage create file each key at "dirpath/key"
-func NewFileStorage(dirpath string) *FileStorage {
+func NewFileStorage(dirpath string) (storage *FileStorage, err error) {
+	fileInfo, err := os.Stat(dirpath)
+	if err != nil {
+		if !os.IsNotExist(err) {
+			return nil, err
+		}
+
+		err = os.MkdirAll(dirpath, 0755)
+		if err != nil {
+			return nil, err
+		}
+		return NewFileStorage(dirpath)
+	}
+
+	if !fileInfo.IsDir() {
+		return nil, ErrInvalidDir
+	}
+
 	return &FileStorage{
 		dirpath: path.Dir(dirpath),
 		trays:   map[string]*tray{},
-	}
+	}, nil
 }
 
 func (f *FileStorage) get(key string, dest interface{}, useCache bool) (err error) {
