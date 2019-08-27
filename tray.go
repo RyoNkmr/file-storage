@@ -2,7 +2,6 @@ package filestorage
 
 import (
 	"errors"
-	"fmt"
 	"io/ioutil"
 	"os"
 	"path"
@@ -31,7 +30,7 @@ func newTray(dirpath, filename string, expiredAt *time.Time) *tray {
 
 func (s *tray) isExpired() (isExpired bool, err error) {
 	if s.expiredAt == nil {
-		return false, ErrNeverExpire
+		return false, ErrLiveForever
 	}
 	return s.expiredAt.Before(time.Now()), nil
 }
@@ -42,7 +41,6 @@ func (s *tray) clear() (err error) {
 
 	s.cache = nil
 	if _, err = os.Stat(s.path); err == nil {
-		fmt.Println("file exist, removed")
 		return os.Remove(s.path)
 	}
 	return err
@@ -58,8 +56,7 @@ func (s *tray) get(dest interface{}, useCache bool) (err error) {
 		if err = s.clear(); err != nil {
 			return err
 		}
-		fmt.Println("expired")
-		return ErrNoData
+		return ErrExpired
 	}
 
 	if useCache && s.cache != nil {
