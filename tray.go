@@ -13,26 +13,65 @@ import (
 )
 
 type tray struct {
-	path      string
-	cache     []byte
-	mut       sync.RWMutex
-	expiredAt *time.Time
+	Path      string
+	ExpiredAt *time.Time
+	Key       string
+
+	cache []byte
+	mut   sync.RWMutex
+	index *indexFile
 }
 
-func newTray(dirpath, filename string, expiredAt *time.Time) *tray {
-	path := path.Join(dirpath, filename)
+func newTray(dirpath, key string, expiredAt *time.Time, index *indexFile) *tray {
+	path := path.Join(dirpath, key)
 	return &tray{
-		path:      path,
+		Path:      path,
+		Key:       key,
+		ExpiredAt: expiredAt,
+		index:     index,
 		mut:       sync.RWMutex{},
-		expiredAt: expiredAt,
 	}
 }
 
-func (s *tray) isExpired() (isExpired bool, err error) {
-	if s.expiredAt == nil {
-		return false, ErrLiveForever
+func newOrLoadTray(dirpath, key string, expiredAt *time.Time, index *indexFile) (*tray, error) {
+	t := newTray(dirpath, key, expiredAt, index)
+	if _, err := os.Stat(t.Path); err != nil {
+		return t, nil
 	}
-	return s.expiredAt.Before(time.Now()), nil
+	err := t.loadCacheFromFile()
+	return t, err
+}
+
+func (s *tray) loadCacheFromFile() (err error) {
+	s.mut.RLock()
+	defer s.mut.RUnlock()
+
+	if isExpired, _ := s.isExpired(); isExpired {
+		return nil
+	}
+
+	if _, err = os.Stat(s.Path); err != nil {
+		return nil
+	}
+
+	file, err := os.Open(s.Path)
+	if err != nil {
+		return err
+	}
+
+	defer file.Close()
+
+	b, err := ioutil.ReadAll(file)
+	s.cache = b
+
+	return err
+}
+
+func (s *tray) isExpired() (bool, error) {
+	if s.index != nil {
+		return s.index.isExpired(s.Key)
+	}
+	return false, ErrIndexNotFound
 }
 
 func (s *tray) clear() (err error) {
@@ -40,10 +79,18 @@ func (s *tray) clear() (err error) {
 	defer s.mut.Unlock()
 
 	s.cache = nil
-	if _, err = os.Stat(s.path); err == nil {
-		return os.Remove(s.path)
+	if _, err = os.Stat(s.Path); err != nil {
+		return err
 	}
-	return err
+
+	if err = os.Remove(s.Path); err != nil {
+		return err
+	}
+
+	if s.index != nil {
+		return s.index.delete(s.Key)
+	}
+	return nil
 }
 
 func (s *tray) get(dest interface{}, useCache bool) (err error) {
@@ -67,11 +114,11 @@ func (s *tray) get(dest interface{}, useCache bool) (err error) {
 	s.mut.RLock()
 	defer s.mut.RUnlock()
 
-	if _, err = os.Stat(s.path); err != nil {
+	if _, err = os.Stat(s.Path); err != nil {
 		return ErrNoData
 	}
 
-	file, err := os.Open(s.path)
+	file, err := os.Open(s.Path)
 	if err != nil {
 		return err
 	}
@@ -89,7 +136,7 @@ func (s *tray) get(dest interface{}, useCache bool) (err error) {
 func (s *tray) set(value interface{}) (err error) {
 	s.mut.Lock()
 	defer s.mut.Unlock()
-	file, err := os.OpenFile(s.path, os.O_WRONLY|os.O_CREATE, 0666)
+	file, err := os.OpenFile(s.Path, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, 0666)
 	if err != nil {
 		return err
 	}
@@ -101,6 +148,10 @@ func (s *tray) set(value interface{}) (err error) {
 	if _, err := file.Write(b); err != nil {
 		return err
 	}
+
 	s.cache = b
+	if s.index != nil {
+		return s.index.update(s)
+	}
 	return nil
 }

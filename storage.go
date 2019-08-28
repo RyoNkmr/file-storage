@@ -8,10 +8,11 @@ import (
 )
 
 var (
-	ErrInvalidDir  = errors.New("FileStorage: invalid dirpath given")
-	ErrNoData      = errors.New("FileStorage: no data")              // file accessing methods returns this error when the given key has no data
-	ErrExpired     = errors.New("FileStorage: expired")              // file accessing methods returns this error when the data is expired
-	ErrLiveForever = errors.New("FileStorage: expiredAt is not set") // IsExpired method on FileStorage returns this error when expiredAt is nil for the key
+	ErrInvalidDir    = errors.New("FileStorage: invalid dirpath given")
+	ErrNoData        = errors.New("FileStorage: no data")              // file accessing methods returns this error when the given key has no data
+	ErrExpired       = errors.New("FileStorage: expired")              // file accessing methods returns this error when the data is expired
+	ErrLiveForever   = errors.New("FileStorage: expiredAt is not set") // IsExpired method on FileStorage returns this error when expiredAt is nil for the key
+	ErrIndexNotFound = errors.New("FileStorage: indexfile is not found")
 )
 
 // A storage with cache implementation
@@ -26,6 +27,7 @@ type Storage interface {
 type FileStorage struct {
 	dirpath string
 	trays   map[string]*tray
+	index   *indexFile
 }
 
 // FileStorage creates the storage directory at dirpath to place the file into.
@@ -48,9 +50,24 @@ func NewFileStorage(dirpath string) (storage *FileStorage, err error) {
 		return nil, ErrInvalidDir
 	}
 
+	index, err := NewOrLoadIndexFile(dirpath)
+	if err != nil {
+		return nil, err
+	}
+
+	trays := make(map[string]*tray)
+	for _, entry := range index.getAliveTrayEntries() {
+		t, err := newOrLoadTray(dirpath, entry.Key, entry.ExpiredAt, index)
+		if err != nil {
+			return nil, err
+		}
+		trays[entry.Key] = t
+	}
+
 	return &FileStorage{
 		dirpath: path.Dir(dirpath),
-		trays:   map[string]*tray{},
+		trays:   trays,
+		index:   index,
 	}, nil
 }
 
@@ -58,7 +75,9 @@ func (f *FileStorage) get(key string, dest interface{}, useCache bool) (err erro
 	if _, ok := f.trays[key]; !ok {
 		return ErrNoData
 	}
-	return f.trays[key].get(dest, useCache)
+
+	t := f.trays[key]
+	return t.get(dest, useCache)
 }
 
 // Get scans the stored value from FileStorage into the destination pointer. An error is returned if the data is not stored or has already expired.
@@ -84,14 +103,16 @@ func (f *FileStorage) Delete(key string) (err error) {
 	if _, ok := f.trays[key]; !ok {
 		return ErrNoData
 	}
+
 	return f.trays[key].clear()
 }
 
 // Set stores value into FileStorage.
 // FileStorage creates file each key at "dirpath/key"
-func (f *FileStorage) Set(key string, value interface{}, expiredAt *time.Time) error {
+func (f *FileStorage) Set(key string, value interface{}, expiredAt *time.Time) (err error) {
 	if _, ok := f.trays[key]; !ok {
-		f.trays[key] = newTray(f.dirpath, key, expiredAt)
+		f.trays[key] = newTray(f.dirpath, key, expiredAt, f.index)
 	}
-	return f.trays[key].set(value)
+	t := f.trays[key]
+	return t.set(value)
 }
